@@ -84,6 +84,9 @@ lua/linenoise.so
 lua/mal.lua
 make/mal.mk
 mal/mal.mal
+mal-rs/target/
+mal-rs/Cargo.lock
+mal-rs/.cargo
 matlab/octave-workspace
 miniMAL/mal.json
 nim/nimcache*
