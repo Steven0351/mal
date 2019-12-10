@@ -36,8 +36,8 @@ pub mod reader {
             self.tokens.get(self.position)
         }
 
-        pub fn read_form(&mut self) -> Option<Mal> {
-            let token = self.next()?;
+        pub fn read_form(&mut self) -> Result<Mal, LexerError> {
+            let token = self.next().ok_or(LexerError::UnsupportedSyntax)?;
             let open = String::from("(");
 
             if token.eq(&open) {
@@ -47,7 +47,7 @@ pub mod reader {
             }
         }
 
-        fn read_list(&mut self) -> Option<Mal> {
+        fn read_list(&mut self) -> Result<Mal, LexerError> {
             let close = String::from(")");
             let mut list: Vec<Mal> = vec![];
 
@@ -59,16 +59,20 @@ pub mod reader {
                 }
             }
             
-            Some(Mal::List(list))
+            Ok(Mal::List(list))
         }
 
-        fn read_atom(&self) -> Option<Mal> {
+        fn read_atom(&self) -> Result<Mal, LexerError> {
             let raw_token = self.peek();
 
             match raw_token {
-                Some(token) if token.is_contained_in("0123456789") => Some(Mal::Int(token.parse().unwrap())),
-                Some(token) if STRING_REGEX.is_match(token) => lex_string(token).ok(),
-                _ => None,
+                Some(token) if token.eq("true") => Ok(Mal::True),
+                Some(token) if token.eq("false") => Ok(Mal::False),
+                Some(token) if token.eq("nil") => Ok(Mal::Nil),
+                Some(token) if STRING_REGEX.is_match(token) => lex_string(token),
+                Some(token) if INT_REGEX.is_match(token) => lex_int(token),
+                Some(token) if token.len() == 1 && SYMBOL_REGEX.is_match(token) => lex_symbol(token),
+                _ => Err(LexerError::UnsupportedSyntax),
             }
         }
     }
@@ -77,6 +81,8 @@ pub mod reader {
         static ref ALL_TOKENS: Regex = Regex::new(r#"(~@|[\[\]{}()'`~^@]|"(?:\\.|[^\\"])*"?|;.*|[^\s\[\]{}('"`,;)]*)"#).unwrap();
         static ref STRING_REGEX: Regex = Regex::new(r#""(?:\\.|[^\\"])*"?"#).unwrap();
         static ref QUOTE_REGEX: Regex = Regex::new(r#"""#).unwrap();
+        static ref INT_REGEX: Regex = Regex::new(r#"[\d*]"#).unwrap();
+        static ref SYMBOL_REGEX: Regex = Regex::new(r"[+-\\*/]").unwrap();
     }
 
     fn tokenize(string: &str) -> Vec<String> {
@@ -92,18 +98,37 @@ pub mod reader {
     }
 
     fn lex_string(string: &String) -> Result<Mal, LexerError> {
-        if QUOTE_REGEX.captures_iter(string).count() == 2 {
-            let mal_string = Mal::Str(QUOTE_REGEX.replace_all(string.as_str(), "").to_string());
+        if string.ends_with("\"") {
+            let mal_string = &string.as_str()[1..string.len() - 1];
+            let mal_string = Mal::Str(String::from(mal_string));
             Ok(mal_string)
         } else {
             Err(LexerError::UnbalancedString)
         }
     }
 
+    fn lex_symbol(string: &String) -> Result<Mal, LexerError> {
+        Ok(Mal::Symbol(string.to_string()))
+    }
+
+    fn lex_int(string: &String) -> Result<Mal, LexerError> {
+        if INT_REGEX.captures_iter(string).count() == string.len() {
+            string.parse()
+                .map_err(|_| LexerError::NaN)
+                .map(|i| Mal::Int(i))
+        } else {
+            Err(LexerError::NaN)
+        }
+    }
+
     #[derive(Debug, Fail)]
-    enum LexerError {
+    pub enum LexerError {
         #[fail(display = "Unexpected EOF")]
         UnbalancedString,
+        #[fail(display = "Not a Number")]
+        NaN,
+        #[fail(display = "Syntax Error")]
+        UnsupportedSyntax,
     }
 
     pub enum Mal {
@@ -119,6 +144,26 @@ pub mod reader {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn reader_returns_mal_int() -> Result<(), LexerError> {
+            let mut reader = Reader::read_str("123");
+            let mal_int = reader.read_form()?;
+            if let Mal::Int(i) = mal_int {
+                assert_eq!(123, i);
+            } else { 
+                panic!("Did not generate correct AST");
+            }
+
+            let mut reader = Reader::read_str("123  ");
+            let mal_int = reader.read_form()?;
+            if let Mal::Int(i) = mal_int {
+                assert_eq!(123, i);
+                Ok(())
+            } else { 
+                panic!("Did not generate correct AST");
+            }
+        }
 
         #[test]
         fn captures_single_special_characters() {
@@ -145,8 +190,51 @@ pub mod reader {
         }
 
         #[test]
-        fn quote_regex_finds_string_quotes() {
-            assert_eq!(QUOTE_REGEX.captures_iter("\"This is a string\"").count(), 2);
+        fn symbol_regex_captures_symbols() {
+            let symbol_string = "+ - * /";
+            assert_eq!(SYMBOL_REGEX.captures_iter(symbol_string).count(), 4);
+        }
+
+        #[test]
+        fn lex_string_strips_quotes() -> Result<(), LexerError> {
+            let string = String::from("\"This is a string\"");
+            let string = lex_string(&string)?;
+            
+            if let Mal::Str(string) = string {
+                assert!(string.eq("This is a string"));
+            } else {
+                panic!("No match");
+            }
+
+            Ok(())
+        }
+
+        #[test]
+        fn lex_string_keeps_inner_escaped_quotes() -> Result<(), LexerError> {
+            let string = String::from("\"This is a \\\"fancy\\\" string\"");
+            let string = lex_string(&string)?;
+
+            if let Mal::Str(string) = string {
+                assert!(string.eq(r#"This is a \"fancy\" string"#));
+            } else {
+                panic!("No Match");
+            }
+
+            Ok(())
+        }
+
+        #[test]
+        fn lex_int_parses_succesfully() -> Result<(), LexerError> {
+            let int = String::from("312");
+            let int = lex_int(&int)?;
+
+            if let Mal::Int(int) = int {
+                assert_eq!(int, 312);
+            } else {
+                panic!("Did not properly parse int of value 312");
+            }
+
+            Ok(())
         }
     }
 }
