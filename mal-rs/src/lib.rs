@@ -22,13 +22,8 @@ pub mod reader {
         }
 
         pub fn next(&mut self) -> Option<&String> {
-            // On the first read, we do not want to increment the position because we will 
-            // always end up starting on the second token instead of the first.
-            if self.position != 0 {
-                self.position += 1;
-            }
-
             let token = self.tokens.get(self.position);
+            self.position += 1;
             token
         }
 
@@ -37,28 +32,32 @@ pub mod reader {
         }
 
         pub fn read_form(&mut self) -> Result<Mal, LexerError> {
-            let token = self.next().ok_or(LexerError::UnsupportedSyntax)?;
             let open = String::from("(");
+            let mut mal = Mal::Nil;
 
-            if token.eq(&open) {
-                self.read_list()
-            } else {
-                self.read_atom()
+            if let Some(token) = self.peek() {
+                if token.eq(&open) {
+                    mal = self.read_list()?;
+                } else {
+                    mal = self.read_atom()?;
+                }
             }
+
+            Ok(mal)
         }
 
         fn read_list(&mut self) -> Result<Mal, LexerError> {
-            let close = String::from(")");
             let mut list: Vec<Mal> = vec![];
+ 
+            while let Some(_) = self.next() {
+                let mal = self.read_form()?;
+                list.push(mal);
 
-            while let Some(raw_token) = self.next() {
-                if raw_token.eq(&close) {
+                if let Mal::Nil = list.last().unwrap() {
                     break;
-                } else {
-                    list.push(self.read_form()?);
                 }
             }
-            
+
             Ok(Mal::List(list))
         }
 
@@ -72,7 +71,7 @@ pub mod reader {
                 Some(token) if STRING_REGEX.is_match(token) => lex_string(token),
                 Some(token) if INT_REGEX.is_match(token) => lex_int(token),
                 Some(token) if token.len() == 1 && SYMBOL_REGEX.is_match(token) => lex_symbol(token),
-                _ => Err(LexerError::UnsupportedSyntax),
+                _ =>  Ok(Mal::Nil),
             }
         }
     }
@@ -81,7 +80,7 @@ pub mod reader {
         static ref ALL_TOKENS: Regex = Regex::new(r#"(~@|[\[\]{}()'`~^@]|"(?:\\.|[^\\"])*"?|;.*|[^\s\[\]{}('"`,;)]*)"#).unwrap();
         static ref STRING_REGEX: Regex = Regex::new(r#""(?:\\.|[^\\"])*"?"#).unwrap();
         static ref QUOTE_REGEX: Regex = Regex::new(r#"""#).unwrap();
-        static ref INT_REGEX: Regex = Regex::new(r#"[\d*]"#).unwrap();
+        static ref INT_REGEX: Regex = Regex::new(r#"[\d]"#).unwrap();
         static ref SYMBOL_REGEX: Regex = Regex::new(r"[+-\\*/]").unwrap();
     }
 
@@ -162,6 +161,148 @@ pub mod reader {
                 Ok(())
             } else { 
                 panic!("Did not generate correct AST");
+            }
+        }
+
+        #[test]
+        fn reader_returns_mal_true() -> Result<(), LexerError> {
+            let mut reader = Reader::read_str("true");
+            let mal_true = reader.read_form()?;
+            if let Mal::True = mal_true {
+                Ok(())
+            } else {
+                panic!("true isn't true?");
+            }
+        }
+
+        #[test]
+        fn reader_returns_mal_false() -> Result<(), LexerError> {
+            let mut reader = Reader::read_str("false");
+            let mal_false = reader.read_form()?;
+            if let Mal::False = mal_false {
+                Ok(())
+            } else {
+                panic!("false isn't false?");
+            }
+        }
+
+        #[test]
+        fn reader_returns_mal_nil() -> Result<(), LexerError> {
+            let mut reader = Reader::read_str("nil");
+            let mal_nil = reader.read_form()?;
+            if let Mal::Nil = mal_nil {
+                Ok(())
+            } else {
+                panic!("nil isn't nil");
+            }
+        }
+
+        #[test]
+        fn reader_returns_mal_symbol() -> Result<(), LexerError> {
+            let mut reader = Reader::read_str("+");
+            let mal_symbol = reader.read_form()?;
+            if let Mal::Symbol(symbol) = mal_symbol {
+                assert!(symbol.eq("+"));
+                Ok(())
+            } else {
+                panic!("Could not parse symbol from +")
+            }
+        }
+
+        #[test]
+        fn reader_returns_mal_string() -> Result<(), LexerError> {
+            let mut reader = Reader::read_str("\"This is a string\"");
+            let mal_string = reader.read_form()?;
+            if let Mal::Str(string) = mal_string {
+                assert!(string.eq("This is a string"));
+                Ok(())
+            } else {
+                panic!("Could not parse string from \"This is a string\"");
+            }
+        }
+
+        #[test]
+        fn reader_returns_simple_mal_list() -> Result<(), LexerError> {
+            let mut reader = Reader::read_str("( 123 456 789 )");
+            let mal_list = reader.read_form()?;
+            if let Mal::List(list) = mal_list {
+                let mut vec: Vec<u32> = vec![];
+                for elem in &list {
+                    if let Mal::Int(i) = elem {
+                        vec.push(*i);
+                    }
+                }
+                assert_eq!(vec[0], 123);
+                assert_eq!(vec[1], 456);
+                assert_eq!(vec[2], 789);
+                
+                if let Mal::Nil = &list[3] {
+                    Ok(())
+                } else {
+                    panic!("List not nil terminated");
+                }
+            } else {
+                panic!("Could not parse list from (123 123 123)");
+            }
+        }
+
+        #[test]
+        fn reader_returns_nested_mal_list() -> Result<(), LexerError> {
+            let mut reader = Reader::read_str("( + 2 (* 3 4) )");
+            let mal_list = reader.read_form()?;
+            if let Mal::List(list) = mal_list {
+                assert_eq!(list.len(), 4);
+
+                if let Mal::Symbol(sym) = &list[0] {
+                    assert!(sym.eq("+"));
+                } else {
+                    panic!("Element 0 was not +");
+                }
+
+                if let Mal::Int(i) = &list[1] {
+                    assert_eq!(2, *i);
+                } else {
+                    panic!("Element 1 was not 2");
+                }
+
+                if let Mal::List(list) = &list[2] {
+                    assert_eq!(list.len(), 4);
+
+                    if let Mal::Symbol(sym) = &list[0] {
+                        assert!(sym.eq("*"));
+                    } else {
+                        panic!("Inner List Element 0 was not *");
+                    }
+
+                    if let Mal::Int(i) = &list[1] {
+                        assert_eq!(3, *i);
+                    } else {
+                        panic!("Inner List Element 1 was not 3");
+                    }
+
+                    if let Mal::Int(i) = &list[2] {
+                        assert_eq!(4, *i);
+                    } else {
+                        panic!("Inner List Element 2 was not 4")
+                    }
+
+                    if let Mal::Nil = &list[3] {
+                        
+                    } else {
+                        panic!("Inner list was not nil terminated");
+                    }
+
+                } else {
+                    panic!("Element 2 was not (* 3 4)");
+                }
+
+                if let Mal::Nil = &list[3] {
+                    Ok(())
+                } else {
+                    panic!("List was not nil terminated");
+                }
+            } else {
+                panic!("Could not parse list from ( + 2 (* 3 4) )");
             }
         }
 
