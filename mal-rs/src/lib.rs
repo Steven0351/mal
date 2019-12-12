@@ -3,8 +3,17 @@
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate failure_derive;
 
+pub mod printer {
+    use super::reader::{self, Reader};
+
+    pub fn print_str(mal: &reader::Mal) -> String {
+        format!("{}", mal)
+    }
+}
+
 pub mod reader {
     use regex::Regex;
+    use std::fmt;
     use std::str::pattern::Pattern;
 
     #[derive(Debug)]
@@ -138,7 +147,32 @@ pub mod reader {
         False,
         Symbol(String),
         List(Vec<Mal>),
-    } 
+    }
+
+    impl fmt::Display for Mal {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let string = match self {
+                Mal::Int(i) => format!("{}", i),
+                Mal::Str(s) => format!("{}", s),
+                Mal::Nil => String::from("nil"),
+                Mal::True => String::from("true"),
+                Mal::False => String::from("false"),
+                Mal::Symbol(s) => format!("{}", s),
+                Mal::List(vec) => {
+                    let mut string = String::from("(");
+                    for item in vec {
+                        if let Mal::Nil = item { continue; }
+                        string.push_str(format!("{} ", item).as_str());
+                    }
+                    string.pop();
+                    string.push_str(")");
+                    string
+                }
+            };
+
+            write!(f, "{}", string)
+        }
+    }
     
     #[cfg(test)]
     mod tests {
