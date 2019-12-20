@@ -78,8 +78,8 @@ pub mod reader {
                 Some(token) if token.eq("false") => Ok(Mal::False),
                 Some(token) if token.eq("nil") => Ok(Mal::Nil),
                 Some(token) if STRING_REGEX.is_match(token) => lex_string(token),
-                Some(token) if INT_REGEX.is_match(token) => lex_int(token),
-                Some(token) if token.len() == 1 && SYMBOL_REGEX.is_match(token) => lex_symbol(token),
+                Some(token) if token.parse::<i32>().is_ok() => lex_int(token),
+                Some(token) => lex_symbol(token),
                 _ =>  Ok(Mal::Nil),
             }
         }
@@ -89,8 +89,8 @@ pub mod reader {
         static ref ALL_TOKENS: Regex = Regex::new(r#"(~@|[\[\]{}()'`~^@]|"(?:\\.|[^\\"])*"?|;.*|[^\s\[\]{}('"`,;)]*)"#).unwrap();
         static ref STRING_REGEX: Regex = Regex::new(r#""(?:\\.|[^\\"])*"?"#).unwrap();
         static ref QUOTE_REGEX: Regex = Regex::new(r#"""#).unwrap();
-        static ref INT_REGEX: Regex = Regex::new(r#"[\d]"#).unwrap();
-        static ref SYMBOL_REGEX: Regex = Regex::new(r"[+-\\*/]").unwrap();
+        static ref INT_REGEX: Regex = Regex::new(r#"[-?(=\d)]"#).unwrap();
+        //static ref SYMBOL_REGEX: Regex = Regex::new(r"[+-\\*/]").unwrap();
     }
 
     fn tokenize(string: &str) -> Vec<String> {
@@ -120,13 +120,9 @@ pub mod reader {
     }
 
     fn lex_int(string: &String) -> Result<Mal, LexerError> {
-        if INT_REGEX.captures_iter(string).count() == string.len() {
-            string.parse()
-                .map_err(|_| LexerError::NaN)
-                .map(|i| Mal::Int(i))
-        } else {
-            Err(LexerError::NaN)
-        }
+        string.parse()
+            .map_err(|_| LexerError::NaN)
+            .map(|i| Mal::Int(i))
     }
 
     #[derive(Debug, Fail)]
@@ -140,7 +136,7 @@ pub mod reader {
     }
 
     pub enum Mal {
-        Int(u32),
+        Int(i32),
         Str(String),
         Nil,
         True,
@@ -153,7 +149,7 @@ pub mod reader {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             let string = match self {
                 Mal::Int(i) => format!("{}", i),
-                Mal::Str(s) => format!("{}", s),
+                Mal::Str(s) => format!("\"{}\"", s),
                 Mal::Nil => String::from("nil"),
                 Mal::True => String::from("true"),
                 Mal::False => String::from("false"),
@@ -260,7 +256,7 @@ pub mod reader {
             let mut reader = Reader::read_str("( 123 456 789 )");
             let mal_list = reader.read_form()?;
             if let Mal::List(list) = mal_list {
-                let mut vec: Vec<u32> = vec![];
+                let mut vec: Vec<i32> = vec![];
                 for elem in &list {
                     if let Mal::Int(i) = elem {
                         vec.push(*i);

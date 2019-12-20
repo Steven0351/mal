@@ -6,6 +6,9 @@ all: $(STEPS)
 	cargo build --release --bin $*
 	cp target/release/$* $@
 
+dirty_clean:
+	rm -rf $(STEPS)
+
 clean:
 	cargo clean
 	rm -rf $(STEPS)

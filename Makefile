@@ -47,7 +47,7 @@ all help:
 # Command line settings
 #
 
-MAL_IMPL = js
+MAL_IMPL = mal-rs
 
 # cbm or qbasic
 basic_MODE = cbm
